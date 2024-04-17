@@ -1,0 +1,70 @@
+#!/bin/bash
+##%%%
+##
+## This script attempts to populate a directory with a working Zapp packaging
+## of an existing application.  The libraries are discovered using the
+## host's dynamic loader, and copied into the output directory,
+## along with a loader shim and everything else needed to make a working Zapp.
+##
+## Be mindful of licensing if you wish to redistribute the result.
+## While we can certainly automate the mechanical parts of packaging...
+## This script cannot detect and automatically repackage licensing information for you!
+##
+##%%%
+
+## Baseline bash safe mode.
+set -euo pipefail
+
+## Initialize systemic variables.
+##  Usually these have sensible defaults, but you can override them.
+ZAPPKIT_ELFINTERP="${ZAPPKIT_ELFINTERP:-"/usr/lib64/ld-linux-x86-64.so.2"}"
+ZAPPKIT_SHIM_BIN="${ZAPPKIT_SHIM_BIN:-"$(which ldshim)"}"
+
+## Process arguments into variables.
+target_program="${1?"must provide target program as first argument"}"
+out_dir="${out_dir:-"_zapp_out/"}"
+  # ^ have floated idea of 'apps/$(basename "$target_program")' being part of this,
+  #    but it's unclear how much splaying opinions we want to embed nonoptionally in this script.
+  #     Currently leaning towards thinking that less is probably better.
+
+## Set up the directory skeleton for our packaged output.
+##  We do not clear these before proceeding, if they already exist.
+##   (Maybe you want to accumulate several zappings into one target directory; that should work.)
+>&2 printf "preparing directories...\n"
+mkdir -p -- "$out_dir" || true
+mkdir -p -- "$out_dir/bin" || true
+mkdir -p -- "$out_dir/dynbin" || true
+mkdir -p -- "$out_dir/lib" || true
+
+## In all cases, we copy the binary to the dynbin folder, and the shim to the bin folder:
+>&2 printf "copying executable...\n"
+cp -- "$target_program"    "$out_dir/dynbin/$(basename "$target_program")"
+>&2 printf "copying shim...\n"
+cp -- "$ZAPPKIT_SHIM_BIN"  "$out_dir/bin/$(basename "$target_program")"
+
+## A copy of the ELF interpreter also comes along.
+##  (Treating the ELF interpreter as an acceptable system-provided dependency does NOT in fact fly!
+##   Though one might hope and wish this, it just isn't viable:
+##    in the wild, system ELF interpreters and the libc library often have extreme entanglements.
+##    Attempting to ship an application with one and assuming that finding the other on the host will play nice...
+##     it just doesn't work.  Or, maybe, it does; but it's not something you can rely on.)
+##
+## We treat the ELF interper as just another library.
+## It goes in the lib folder, and that's that.
+>&2 printf "copying ELF interpreter...\n"
+cp -- "$ZAPPKIT_ELFINTERP" "$out_dir/lib/ld-linux-x86-64.so.2" # The ldshim must share this expectation.
+
+## Now, the library files themselves.
+##
+## Simple copying is sufficient.
+## If the library paths are symlinks, that's fine; we copy the target data.
+## Additional indirections of file and symlink naming are generally not relevant to our interests.
+## To have a functioning Zapp, the library name only has to match what the ELF headers say.
+>&2 printf "copying libraries...\n"
+readarray -t libs < <(zapp-x-libls "$target_program")
+for row in "${libs[@]}"; do
+	IFS=$'\t' read libName libPath <<< "$row"
+	cp -- "$libPath" "$out_dir/lib/$libName"
+done
+
+>&2 printf "done!\n"
