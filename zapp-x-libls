@@ -1,0 +1,95 @@
+#!/bin/bash
+##%%%
+##
+## This script prints dynamic library dependencies for ELF libraries in
+## line-break delimited entries of "{libname}\t{path}\n".
+##
+## The library names are what is listed in the ELF headers
+## (in other words, you should see the same things in `readelf -d $thebinary | grep NEEDED`).
+## The paths are where those have been found on the local machine
+## (in other words, this is a property of the local resolution process;
+## these paths are generally *not* hardcoded in the binary).
+##
+## This uses the host's LD interpreter (presuming we can find one
+## at a default location), or one you provide.
+## (It is, at heart, doing something very similar to 'ldd';
+## we're just cleaning it up with a little different focus.)
+## That means the path we report from this script is exactly what
+## that LD interpreter would've done (assuming it's truthful with us).
+##
+## Only dynamic libraries backed by files are reported.
+## Other fun stuff like the Linux VSDO are *not* included,
+## nor is the LD interpreter itself reported.
+##
+##%%%
+
+## Baseline bash safe mode.
+set -euo pipefail
+
+## Initialize systemic variables.
+##  Usually these have sensible defaults, but you can override them.
+ZAPPKIT_ELFINTERP="${ZAPPKIT_ELFINTERP:-"/usr/lib64/ld-linux-x86-64.so.2"}"
+
+## Process arguments into variables.
+target_program="${1?"must provide target program as first argument"}"
+
+## Ask the LD interpreter to speak!
+## Collect the output into an array of lines.
+##
+## We use the "LD_TRACE_LOADED_OBJECTS=1" mechanism to ask for information (instead of launching the program).
+##  An alternative mechanism sometimes available is to use a "--list" argument;
+##   however, I'm not sure how widespread support for this is.
+##  The env var approach is what I see most commonly in `ldd` scripts, so I assume it's the more reliably available approach.
+##
+readarray -t liblines < <(
+	LD_TRACE_LOADED_OBJECTS=1 "$ZAPPKIT_ELFINTERP" "$target_program"
+)
+
+## Process the text lines from the LD interp into more what we want.
+##
+## We'll do this by applying a regexp to each line.
+## The expression is crafted to only match for lines describing libraries with file paths.
+## We immediately emit our processed result on stdout.
+declare -A libs
+for line in "${liblines[@]}"; do
+	#echo "${line@Q}"
+
+	## This regexp hits on a couple points:
+	##   - The output lines always start with a tab.
+	##   - The library name is whatever comes before a "=>".
+	##   - ... except when it's an in-memory only library; then the "=>" doesn't appear at all.
+	##       For our purposes: we just don't match that line.  We don't need it anyway.
+	##   - There's a file path after that.  It's always absolute.
+	##   - A memory address comes in parens at the end.
+	##       We don't need this, so we don't report it, but we do match on it, just to be exhaustive.
+	##
+	## Is that enough?
+	##
+	## Well, I don't know.  It depends on how loosey-goosey your ELF interp is
+	## about handling any library names or filesystem paths that have wonky characters in them.
+	## (It looks to me like it's typical for there to be no escaping at all on the file path part,
+	## which is why our regexp is so complete about handling the full line.)
+	## (If the path to the library contains a linebreak, things are truly impossible to control.
+	## This is unfortunate, because it's possible.  I see no way to address this in our script;
+	## the ELF interp would have to do some escaping or validation of its output, and
+	## the ones I'm seeing in the wild... don't.)
+	## (I haven't tested at all what happens if a library name has madness in it.
+	## I suspect it's unhandled in the typical ELF interp as well, and thus uncorrectable here.)
+	##
+	## I've seen other parsers of this data outright assume no spaces are present in any names,
+	## and we've managed to do a bit better than that.  But ultimately we're parsing a format
+	## that has no escaping that is sufficient for the range of data it's willing to pass through,
+	## and there's simply no way to secure that.  The regexp isn't the problem; the data is.
+	##
+	## So!  Moving along... as best we can...
+	if [[ $line =~ ^$'\t'([^\0/]+)\ =\>\ (/[^\0]+)\ \([x0-9a-f]+\)$ ]]; then
+		#declare -p BASH_REMATCH
+		printf "%s\t%s\n" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+	fi
+	## One more interesting bit of that regexp: we don't match if any slashes are in the library name.
+	## As far as I know, the only time a slash appears in the library name is itself a special case:
+	## it's when the ELF interp reports *itself*: it does this with a full path, including a leading slash.
+	## Excluding that from our consideration is generally correct for our purposes here.
+	## TODO: if something uses the mad/unsafe ORIGIN format for the ELF interp itself, I wonder if that shows up here
+	## with that full form; that might need additional parser conditions.  Still, that's approximately never done in the wild.
+done
