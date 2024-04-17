@@ -5,8 +5,8 @@ Zapps (see [zapps.app](https://zapps.app/) !) are a convention for packaging lin
 in a highly portable and distro-agnostic way.
 
 More information about Zapps can be found in the website,
-but in brief: they offer simplicity of distribution on par with static linking...
-while still using dynamic libraries, meaning any application can be packaged as a Zapp (often, without even rebuilding!).
+but in brief: Zapps offer simplicity of distribution on par with static linking, while still using dynamic libraries.
+This means any application can be packaged as a Zapp (often, without even rebuilding!).
 
 This repo is to collect tools which help produce Zapps.
 
