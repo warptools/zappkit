@@ -17,7 +17,7 @@ set -euo pipefail
 
 ## Initialize systemic variables.
 ##  Usually these have sensible defaults, but you can override them.
-ZAPPKIT_ELFINTERP="${ZAPPKIT_ELFINTERP:-"/usr/lib64/ld-linux-x86-64.so.2"}"
+ZAPPKIT_ELFINTERP="${ZAPPKIT_ELFINTERP:-"/lib64/ld-linux-x86-64.so.2"}"
 ZAPPKIT_SHIM_BIN="${ZAPPKIT_SHIM_BIN:-"$(which ldshim)"}"
 
 ## Process arguments into variables.
